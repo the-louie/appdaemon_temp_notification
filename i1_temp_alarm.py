@@ -1,92 +1,272 @@
+"""
+Temperature Alarm App for AppDaemon.
+
+This module provides a temperature monitoring and alerting system for Home Assistant
+via AppDaemon. It monitors temperature sensors and sends notifications when
+temperature values fall within configured ranges.
+
+Author: the_louie
+License: BSD 2-Clause
+"""
+
 from datetime import datetime
-import json
+from typing import Any, Dict
+import traceback
+
 import appdaemon.plugins.hass.hassapi as hass
 
-#TempAlarmLghEntre:
-#  module: i1_temp_alarm
-#  class: TempAlarm
-#  sensor: "sensor.v0_lgh_entre_temp"
-#  notify:
-#    - mobile_app_pixel_9_pro
-#  name: "Äpplen"
-#  limits:
-#    - lt: 5
-#      gt: 1
-#      message: "All ok"
-#      msg_cooldown: 86400
-#    - lt: 1
-#      gt: 0
-#      message: "Getting cold"
-#      msg_cooldown: 86400
-#    - lt: 0
-#      gt: -4
-#      message: "Very coold"
-#      msg_cooldown: 21600
-#    - lt: -4
-#      gt: -999
-#      message: "Too cold!"
-#      msg_cooldown: 3600
 
 class TempAlarm(hass.Hass):
-  def initialize(self):
-    self.log("Loading TempAlarm()")
+    """
+    Temperature Alarm App for AppDaemon.
 
-    self.sensor = self.args.get("sensor")
-    self.recipients = self.args.get("recipients")
-    self.alert_name = self.args.get("name")
-    self.limits = self.args.get("limits")
+    Monitors temperature sensors and sends notifications when temperature values
+    fall within configured ranges. Supports multiple temperature thresholds with
+    configurable cooldown periods to prevent notification spam.
 
-    if self.sensor is None:
-      self.log(" >> TempAlarm.initialize(): Warning - Not configured")
-      return
+    Configuration:
+        sensor (str): Entity ID of the temperature sensor to monitor
+        recipients (list[str]): List of notification service names
+        name (str): Display name for the alarm system
+        limits (list[dict]): List of temperature limit configurations
+            - lt (float): Upper temperature limit (less than)
+            - gt (float): Lower temperature limit (greater than or equal)
+            - message (str): Notification message for this range
+            - msg_cooldown (int): Cooldown period in seconds
+    """
 
-    if not isinstance(self.recipients, list):
-      self.recipients = [self.recipients]
+    def initialize(self) -> None:
+        """
+        Initialize the temperature alarm system.
 
-    self.listen_state(self.state_change, self.sensor)
-    
-    self.log(" >> TempAlarm {} ==> {}".format(self.sensor,
-                                                 self.recipients))
+        Sets up configuration, validates parameters, and starts monitoring
+        the specified temperature sensor.
 
-    # add some more stuff to the limits dict
-    for limit in self.limits:
-        limit["lmts"] = datetime(1970, 1, 1) # last message timestamp
+        Raises:
+            ValueError: If required configuration is missing or invalid
+        """
+        try:
+            self.log("Initializing TempAlarm application", level="INFO")
 
-    self.check_state(self.get_state(self.sensor))
+            # Load and validate configuration
+            self._load_configuration()
+            self._validate_configuration()
 
-  def state_change(self, entity, attribute, old, new, kwargs):
-    if new != old and new is not None:
-      self.check_state(new)
+            # Initialize internal state
+            self._initialize_limits()
 
+            # Start monitoring
+            self.listen_state(self._state_change_callback, self.sensor)
 
-  def check_state(self, new):
-    if new is None:
-        return
-    if new == "unavailable":
-        return
+            # Check initial state
+            initial_state = self.get_state(self.sensor)
+            self.log(f"Initial sensor state: {initial_state}", level="DEBUG")
+            self._check_temperature_state(initial_state)
 
-    self.log("check_state({})".format(new))
-    value = float(new)
+            self.log(
+                f"TempAlarm '{self.alert_name}' initialized successfully. "
+                f"Monitoring sensor: {self.sensor}, "
+                f"Recipients: {self.recipients}",
+                level="INFO"
+            )
 
-    now = datetime.now()
-    message = None
-    for limit in self.limits:
-        self.log("lim: {}".format(limit))
-        if value < limit.get("lt") and value >= limit.get("gt"):
-            if (now - limit.get("lmts")).total_seconds() > limit.get("msg_cooldown"):
-                self.log("SEND: {}".format(limit.get("message")))
-                message = "{} ({}°)".format(limit.get("message"), value)
-                limit["lmts"] = datetime.now()
+        except Exception as e:
+            self.log(
+                f"Failed to initialize TempAlarm: {str(e)}",
+                level="ERROR"
+            )
+            self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+            raise
+
+    def _load_configuration(self) -> None:
+        """
+        Load configuration parameters from AppDaemon args.
+
+        Raises:
+            ValueError: If required configuration is missing
+        """
+        self.log("Loading configuration parameters", level="DEBUG")
+
+        self.sensor = self.args.get("sensor")
+        self.recipients = self.args.get("recipients")
+        self.alert_name = self.args.get("name")
+        self.limits = self.args.get("limits")
+
+        self.log(f"Configuration loaded - Sensor: {self.sensor}, "
+                f"Name: {self.alert_name}, Limits count: {len(self.limits)}",
+                level="DEBUG")
+
+    def _validate_configuration(self) -> None:
+        """
+        Validate that all required configuration parameters are present and valid.
+
+        Raises:
+            ValueError: If configuration is invalid
+        """
+        self.log("Validating configuration", level="DEBUG")
+
+        if not self.sensor:
+            raise ValueError("Required configuration 'sensor' is missing")
+
+        if not self.recipients:
+            raise ValueError("Required configuration 'recipients' is missing")
+
+        if not self.alert_name:
+            raise ValueError("Required configuration 'name' is missing")
+
+        if not self.limits or not isinstance(self.limits, list):
+            raise ValueError("Required configuration 'limits' is missing or not a list")
+
+        # Ensure recipients is a list
+        if not isinstance(self.recipients, list):
+            self.recipients = [self.recipients]
+
+        # Validate limits structure
+        for i, limit in enumerate(self.limits):
+            if not isinstance(limit, dict):
+                raise ValueError(f"Limit {i} is not a dictionary")
+
+            required_keys = ["lt", "gt", "message", "msg_cooldown"]
+            for key in required_keys:
+                if key not in limit:
+                    raise ValueError(f"Limit {i} missing required key '{key}'")
+
+            if not isinstance(limit["msg_cooldown"], (int, float)) or limit["msg_cooldown"] < 0:
+                raise ValueError(f"Limit {i} has invalid msg_cooldown value")
+
+        self.log("Configuration validation completed successfully", level="DEBUG")
+
+    def _initialize_limits(self) -> None:
+        """Initialize the limits with timestamp tracking."""
+        self.log("Initializing temperature limits", level="DEBUG")
+
+        for i, limit in enumerate(self.limits):
+            # Initialize last message timestamp to epoch start
+            limit["last_message_timestamp"] = datetime(1970, 1, 1)
+            self.log(f"Initialized limit {i}: {limit['gt']}°C <= temp < {limit['lt']}°C "
+                    f"-> '{limit['message']}' (cooldown: {limit['msg_cooldown']}s)",
+                    level="DEBUG")
+
+    def _state_change_callback(self, entity: str, attribute: str,
+                             old: str, new: str, kwargs: Dict[str, Any]) -> None:
+        """
+        Callback for sensor state changes.
+
+        Args:
+            entity: The entity that changed
+            attribute: The attribute that changed
+            old: Previous state value
+            new: New state value
+            kwargs: Additional callback arguments
+        """
+        try:
+            if new != old and new is not None:
+                self.log(f"Temperature sensor state changed: {old} -> {new}", level="DEBUG")
+                self._check_temperature_state(new)
             else:
-                self.log("Cooldown active {} {}".format((now - limit.get("lmts")).total_seconds(), limit.get("msg_cooldown")))
+                self.log(f"Ignoring state change: {old} -> {new}", level="DEBUG")
 
-            break
+        except Exception as e:
+            self.log(f"Error in state change callback: {str(e)}", level="ERROR")
+            self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
-    if message is None:
-        self.log("No message, returning")
-        return
+    def _check_temperature_state(self, temperature_state: str) -> None:
+        """
+        Check temperature state against configured limits and send notifications.
 
-    for recipient in self.recipients:
-        self.log("sending '{}' to {}".format(message, recipient))
-        self.call_service("notify/{}".format(recipient), title="{} temp".format(self.alert_name), message=message)
-    
+        Args:
+            temperature_state: The current temperature state as a string
+        """
+        try:
+            # Handle invalid states
+            if temperature_state is None:
+                self.log("Temperature state is None, skipping check", level="WARNING")
+                return
+
+            if temperature_state == "unavailable":
+                self.log("Temperature sensor is unavailable, skipping check", level="WARNING")
+                return
+
+            # Convert to float and validate
+            try:
+                temperature_value = float(temperature_state)
+            except (ValueError, TypeError) as e:
+                self.log(f"Invalid temperature value '{temperature_state}': {str(e)}", level="ERROR")
+                return
+
+            self.log(f"Checking temperature {temperature_value}°C against {len(self.limits)} limits",
+                    level="DEBUG")
+
+            # Check each limit
+            message_to_send = None
+            current_time = datetime.now()  # Single timestamp for consistency
+
+            for i, limit in enumerate(self.limits):
+                self.log(f"Checking limit {i}: {limit['gt']}°C <= {temperature_value}°C < {limit['lt']}°C",
+                        level="DEBUG")
+
+                if limit['gt'] <= temperature_value < limit['lt']:
+                    self.log(f"Temperature {temperature_value}°C matches limit {i}", level="INFO")
+
+                    # Check cooldown
+                    time_since_last = current_time - limit['last_message_timestamp']
+                    cooldown_remaining = limit['msg_cooldown'] - time_since_last.total_seconds()
+
+                    if cooldown_remaining <= 0:
+                        message_to_send = f"{limit['message']} ({temperature_value:.1f}°C)"
+                        limit['last_message_timestamp'] = current_time
+                        self.log(f"Preparing to send message: '{message_to_send}'", level="INFO")
+                    else:
+                        self.log(f"Cooldown active for limit {i}. "
+                               f"Remaining: {cooldown_remaining:.0f}s / {limit['msg_cooldown']}s",
+                               level="DEBUG")
+
+                    break
+                else:
+                    self.log(f"Temperature {temperature_value}°C does not match limit {i}", level="DEBUG")
+
+            # Send notification if message is ready
+            if message_to_send:
+                self._send_notifications(message_to_send)
+            else:
+                self.log("No notification message to send", level="DEBUG")
+
+        except Exception as e:
+            self.log(f"Error checking temperature state: {str(e)}", level="ERROR")
+            self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+
+    def _send_notifications(self, message: str) -> None:
+        """
+        Send notifications to all configured recipients.
+
+        Args:
+            message: The message to send
+        """
+        try:
+            self.log(f"Sending notification to {len(self.recipients)} recipients", level="INFO")
+
+            for recipient in self.recipients:
+                try:
+                    service_name = f"notify/{recipient}"
+                    title = f"{self.alert_name} Temperature Alert"
+
+                    self.log(f"Sending to {recipient}: '{message}'", level="INFO")
+
+                    self.call_service(
+                        service_name,
+                        title=title,
+                        message=message
+                    )
+
+                    self.log(f"Successfully sent notification to {recipient}", level="DEBUG")
+
+                except Exception as e:
+                    self.log(f"Failed to send notification to {recipient}: {str(e)}", level="ERROR")
+                    self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+
+            self.log("Notification sending completed", level="DEBUG")
+
+        except Exception as e:
+            self.log(f"Error in notification sending: {str(e)}", level="ERROR")
+            self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+

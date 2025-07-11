@@ -1,0 +1,91 @@
+# Temperature Alarm App Configuration Example
+#
+# This file contains example configurations for the i1_temp_alarm AppDaemon application.
+# Copy the relevant configuration to your AppDaemon apps.yaml file and customize as needed.
+#
+# Author: the_louie
+# License: BSD 2-Clause
+
+# Example 1: Cold Storage Monitoring
+TempAlarmColdStorage:
+  module: i1_temp_alarm
+  class: TempAlarm
+  sensor: "sensor.cold_storage_temp"
+  recipients:
+    - mobile_app_pixel_9_pro
+    - notify_telegram
+  name: "Cold Storage"
+  limits:
+    - lt: 5
+      gt: 1
+      message: "Cold storage temperature is normal"
+      msg_cooldown: 86400  # 24 hours
+    - lt: 1
+      gt: 0
+      message: "Cold storage is getting warm"
+      msg_cooldown: 21600  # 6 hours
+    - lt: 0
+      gt: -4
+      message: "Cold storage is very warm"
+      msg_cooldown: 3600   # 1 hour
+    - lt: -4
+      gt: -999
+      message: "Cold storage is too warm!"
+      msg_cooldown: 1800   # 30 minutes
+
+# Example 2: Greenhouse Monitoring
+TempAlarmGreenhouse:
+  module: i1_temp_alarm
+  class: TempAlarm
+  sensor: "sensor.greenhouse_temperature"
+  recipients:
+    - mobile_app_garden_phone
+  name: "Greenhouse"
+  limits:
+    - lt: 15
+      gt: 10
+      message: "Greenhouse temperature is low"
+      msg_cooldown: 3600   # 1 hour
+    - lt: 10
+      gt: 5
+      message: "Greenhouse is very cold"
+      msg_cooldown: 1800   # 30 minutes
+    - lt: 5
+      gt: -999
+      message: "Greenhouse is freezing!"
+      msg_cooldown: 900    # 15 minutes
+    - lt: 999
+      gt: 30
+      message: "Greenhouse is too hot"
+      msg_cooldown: 1800   # 30 minutes
+
+# Example 3: Server Room Monitoring
+TempAlarmServerRoom:
+  module: i1_temp_alarm
+  class: TempAlarm
+  sensor: "sensor.server_room_temp"
+  recipients:
+    - mobile_app_admin
+    - notify_slack
+  name: "Server Room"
+  limits:
+    - lt: 25
+      gt: 18
+      message: "Server room temperature is normal"
+      msg_cooldown: 86400  # 24 hours
+    - lt: 18
+      gt: 15
+      message: "Server room is getting cold"
+      msg_cooldown: 21600  # 6 hours
+    - lt: 15
+      gt: 10
+      message: "Server room is very cold"
+      msg_cooldown: 3600   # 1 hour
+    - lt: 10
+      gt: -999
+      message: "Server room is too cold!"
+      msg_cooldown: 1800   # 30 minutes
+    - lt: 999
+      gt: 30
+      message: "Server room is too hot!"
+      msg_cooldown: 1800   # 30 minutes
