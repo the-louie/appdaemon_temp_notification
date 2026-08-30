@@ -92,6 +92,14 @@ class TempAlarm(hass.Hass):
         self.alert_name = self.args.get("name")
         self.limits = self.args.get("limits")
 
+        # Android companion-app delivery settings. The default HA notification channel
+        # can be disabled on the phone, which silently discards every notification sent
+        # to it - HA reports success and nothing arrives. Sending on a dedicated channel
+        # keeps these alerts independent of that setting and lets them be muted on
+        # their own without affecting other apps. See backlog T-52.
+        self.notification_channel = self.args.get("notification_channel", "temperature_alerts")
+        self.notification_priority = self.args.get("notification_priority", "high")
+
         self.log(f"Configuration loaded - Sensor: {self.sensor}, "
                 f"Name: {self.alert_name}, Limits count: {len(self.limits)}",
                 level="DEBUG")
@@ -235,6 +243,22 @@ class TempAlarm(hass.Hass):
             self.log(f"Error checking temperature state: {str(e)}", level="ERROR")
             self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
+    def _notification_data(self) -> dict:
+        """Build the companion-app data block for a notification.
+
+        Returns the Android delivery hints every notify call in this app must carry:
+        a dedicated channel, plus priority/ttl so the message is not deferred by Doze.
+        Returns an empty dict if no channel is configured, so the caller can pass it
+        unconditionally.
+        """
+        if not self.notification_channel:
+            return {}
+        data = {"channel": self.notification_channel}
+        if self.notification_priority:
+            data["priority"] = self.notification_priority
+            data["ttl"] = 0
+        return data
+
     def _send_notifications(self, message: str) -> None:
         """
         Send notifications to all configured recipients.
@@ -255,10 +279,11 @@ class TempAlarm(hass.Hass):
                     self.call_service(
                         service_name,
                         title=title,
-                        message=message
+                        message=message,
+                        data=self._notification_data()
                     )
 
-                    self.log(f"Successfully sent notification to {recipient}", level="DEBUG")
+                    self.log(f"Successfully sent notification to {recipient}", level="INFO")
 
                 except Exception as e:
                     self.log(f"Failed to send notification to {recipient}: {str(e)}", level="ERROR")
