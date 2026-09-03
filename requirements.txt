@@ -1,4 +1,0 @@
-# Requirements for i1_temp_alarm AppDaemon application
-#
-# Core dependency only
-appdaemon>=4.0.0

@@ -1,0 +1,14 @@
+# NOT named requirements.txt on purpose. The AppDaemon container scans /conf
+# RECURSIVELY for requirements.txt and pip-installs every one it finds, so that
+# name here means a pip run -- and therefore a dependency on PyPI being
+# reachable -- at every restart of the automation host (H-23).
+#
+# This one errors on nothing: appdaemon is the host, so pip finds it already
+# satisfied. But a startup that needs the network to do nothing is still a
+# startup that can fail for want of the network.
+#
+# Kept as documentation of what the app needs when run anywhere else.
+# Requirements for i1_temp_alarm AppDaemon application
+#
+# Core dependency only
+appdaemon>=4.0.0
