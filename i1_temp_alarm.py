@@ -89,7 +89,21 @@ class TempAlarm(hass.Hass):
 
         self.sensor = self.args.get("sensor")
         self.recipients = self.args.get("recipients")
-        self.alert_name = self.args.get("name")
+        # Display name. AppDaemon injects the app's YAML key into args["name"]
+        # and overwrites whatever the config author wrote there, so a config
+        # saying `name: "Vind"` is silently discarded. Verified live 2026-09-05
+        # against the admin API: args["name"] reads 'WindAlarm', 'RainAlarm',
+        # 'TemperatureAlarm', 'TempAlarmLghEntre' -- the app keys, every time,
+        # with the configured value gone entirely rather than kept elsewhere.
+        #
+        # So the display name has to come from a key AppDaemon does not reserve.
+        # Falling back to args["name"] preserves exactly the previous behaviour
+        # for a config that has not been updated: the app key. (T-53)
+        self.alert_name = (
+            self.args.get("alert_name")
+            or self.args.get("name")
+            or self.__class__.__name__
+        )
         self.limits = self.args.get("limits")
 
         # Android companion-app delivery settings. The default HA notification channel
@@ -119,8 +133,13 @@ class TempAlarm(hass.Hass):
         if not self.recipients:
             raise ValueError("Required configuration 'recipients' is missing")
 
-        if not self.alert_name:
-            raise ValueError("Required configuration 'name' is missing")
+        # No check on alert_name. It cannot be missing: AppDaemon always injects
+        # the app's YAML key into args["name"], so the resolver above always
+        # returns something. The check that used to sit here read
+        # `if not self.alert_name: raise` and had never been reachable in the
+        # app's life -- a validation that cannot fire is not protection, it is
+        # a claim of protection. Refusing to start over a cosmetic display name
+        # would also be the wrong trade: the alert matters, its title does not.
 
         if not self.limits or not isinstance(self.limits, list):
             raise ValueError("Required configuration 'limits' is missing or not a list")

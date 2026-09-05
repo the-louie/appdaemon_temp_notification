@@ -14,7 +14,10 @@ TempAlarmColdStorage:
   recipients:
     - mobile_app_pixel_9_pro
     - notify_telegram
-  name: "Cold Storage"
+  # Use `alert_name:`, not `name:`. AppDaemon reserves `name:` and overwrites
+  # it with the app's YAML key, so the value here was never read. Falls back to
+  # the app key if unset. (T-53)
+  alert_name: "Cold Storage"
   limits:
     - lt: 5
       gt: 1
@@ -40,7 +43,7 @@ TempAlarmGreenhouse:
   sensor: "sensor.greenhouse_temperature"
   recipients:
     - mobile_app_garden_phone
-  name: "Greenhouse"
+  alert_name: "Greenhouse"
   limits:
     - lt: 15
       gt: 10
@@ -67,7 +70,7 @@ TempAlarmServerRoom:
   recipients:
     - mobile_app_admin
     - notify_slack
-  name: "Server Room"
+  alert_name: "Server Room"
   limits:
     - lt: 25
       gt: 18
