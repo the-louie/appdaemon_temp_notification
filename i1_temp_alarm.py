@@ -19,6 +19,7 @@ import json
 import os
 import time
 
+import ha_states
 import notification_policy as policy
 
 
@@ -280,8 +281,13 @@ class TempAlarm(hass.Hass):
                 self.log("Temperature state is None, skipping check", level="WARNING")
                 return
 
-            if temperature_state == "unavailable":
-                self.log("Temperature sensor is unavailable, skipping check", level="WARNING")
+            if ha_states.not_reporting(temperature_state):
+                # S7-07: was `== "unavailable"` alone, so a sensor reporting
+                # "unknown" sailed past this guard into float() -- a live gap
+                # the shared predicate closes.
+                self.log(
+                    f"Temperature sensor is not reporting ({temperature_state}), "
+                    f"skipping check", level="WARNING")
                 return
 
             # Convert to float and validate
