@@ -234,13 +234,11 @@ class TempAlarm(hass.Hass):
     def _now_hour(self):
         """Local hour, for the quiet-hours window.
 
-        Naive `datetime.now()` on purpose: the container runs TZ=Europe/Stockholm
-        so this is local time, and the DST hazard T-07 chases is in *durations*,
-        which here come from `time.time()` epoch seconds and are unaffected.
-        Fixing the clock properly across this app belongs to T-07, deliberately,
-        not to an opportunistic edit in a notification ticket.
+        get_now() is AppDaemon's clock: Home Assistant's configured timezone,
+        correct across the fold (S8-05, T-07). Durations in this app come from
+        time.time() epoch seconds and were never affected.
         """
-        return datetime.now().hour
+        return self.get_now().hour
 
     def _load_state(self):
         """Read persisted send-times. Missing or corrupt starts empty."""
@@ -302,7 +300,6 @@ class TempAlarm(hass.Hass):
 
             # Check each limit
             message_to_send = None
-            current_time = datetime.now()  # Single timestamp for consistency
 
             for i, limit in enumerate(self.limits):
                 self.log(f"Checking limit {i}: {limit['gt']}°C <= {temperature_value}°C < {limit['lt']}°C",
