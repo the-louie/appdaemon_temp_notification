@@ -110,3 +110,26 @@ TempAlarmServerRoom:
   # Both are optional. Shown here with the defaults the code applies.
   # notification_channel: temperature_alerts
   # notification_priority: high
+
+# ── Policy D2: quiet hours and persisted cooldowns ──────────────────────
+#
+# Add these to any app block above. Shown with the defaults the code applies.
+#
+# Before S5-08a this app had neither. A band with a six-hour msg_cooldown that
+# stayed true overnight re-fired at 03:00 to repeat what it had said at 21:00,
+# and every AppDaemon restart reset every cooldown and re-alerted every active
+# band -- last_message_timestamp lived in memory and began at 1970 on each boot.
+#
+# A FIRST occurrence is always sent, whatever the hour. Quiet hours suppress
+# nagging, not news: a cold store crossing into its critical band at 02:00 is
+# news. Only repeats are held, and holding does not extend the window -- the
+# alert lands as soon as the window opens rather than a full interval later.
+#
+#   quiet_hours: true
+#   quiet_start: 22          # hour 0-23, inclusive
+#   quiet_end: 7             # hour 0-23, exclusive
+#
+# Where the send-times are kept. Outside the app directory so a redeploy does
+# not wipe them and re-alert everything.
+#
+#   state_file: /conf/temp_alarm_<appname>.json
