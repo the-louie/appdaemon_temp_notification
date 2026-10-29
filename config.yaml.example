@@ -5,6 +5,11 @@
 #
 # Author: the_louie
 # License: BSD 2-Clause
+#
+# Every band needs `urgent: true|false` (T-72d, owner decisions IQ-12/IQ-23,
+# 2026-10-29). Urgent bands reach every recipient wherever they are; non-urgent
+# bands are dropped for a recipient irisone.presence_* says is away. A band
+# without the key stops the app at start-up -- there is no default.
 
 # Example 1: Cold Storage Monitoring
 TempAlarmColdStorage:
@@ -23,18 +28,22 @@ TempAlarmColdStorage:
       gt: 1
       message: "Cold storage temperature is normal"
       msg_cooldown: 86400  # 24 hours
+      urgent: false
     - lt: 1
       gt: 0
       message: "Cold storage is getting warm"
       msg_cooldown: 21600  # 6 hours
+      urgent: false
     - lt: 0
       gt: -4
       message: "Cold storage is very warm"
       msg_cooldown: 3600   # 1 hour
+      urgent: true
     - lt: -4
       gt: -999
       message: "Cold storage is too warm!"
       msg_cooldown: 1800   # 30 minutes
+      urgent: true
 
 # Example 2: Greenhouse Monitoring
 TempAlarmGreenhouse:
@@ -49,18 +58,22 @@ TempAlarmGreenhouse:
       gt: 10
       message: "Greenhouse temperature is low"
       msg_cooldown: 3600   # 1 hour
+      urgent: true
     - lt: 10
       gt: 5
       message: "Greenhouse is very cold"
       msg_cooldown: 1800   # 30 minutes
+      urgent: true
     - lt: 5
       gt: -999
       message: "Greenhouse is freezing!"
       msg_cooldown: 900    # 15 minutes
+      urgent: true
     - lt: 999
       gt: 30
       message: "Greenhouse is too hot"
       msg_cooldown: 1800   # 30 minutes
+      urgent: true
 
 # Example 3: Server Room Monitoring
 TempAlarmServerRoom:
@@ -76,22 +89,27 @@ TempAlarmServerRoom:
       gt: 18
       message: "Server room temperature is normal"
       msg_cooldown: 86400  # 24 hours
+      urgent: false
     - lt: 18
       gt: 15
       message: "Server room is getting cold"
       msg_cooldown: 21600  # 6 hours
+      urgent: false
     - lt: 15
       gt: 10
       message: "Server room is very cold"
       msg_cooldown: 3600   # 1 hour
+      urgent: true
     - lt: 10
       gt: -999
       message: "Server room is too cold!"
       msg_cooldown: 1800   # 30 minutes
+      urgent: true
     - lt: 999
       gt: 30
       message: "Server room is too hot!"
       msg_cooldown: 1800   # 30 minutes
+      urgent: true
 
   # ── Android delivery: which channel these alerts arrive on (T-52) ────
   #

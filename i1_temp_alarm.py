@@ -20,6 +20,7 @@ import os
 import time
 
 import ha_states
+import irisone_bus
 import notification_policy as policy
 
 
@@ -40,6 +41,8 @@ class TempAlarm(hass.Hass):
             - gt (float): Lower temperature limit (greater than or equal)
             - message (str): Notification message for this range
             - msg_cooldown (int): Cooldown period in seconds
+            - urgent (bool): REQUIRED (T-72d, owner IQ-23). Urgent bands reach
+              every recipient; non-urgent bands are dropped for anyone away.
     """
 
     def initialize(self) -> None:
@@ -133,6 +136,8 @@ class TempAlarm(hass.Hass):
             "state_file", f"/conf/temp_alarm_{self.name}.json"
         )
         self.sent_state = self._load_state()
+        # (band key, recipient) -> presence `since` of the last logged drop (O3).
+        self._drop_logged: Dict[tuple, Any] = {}
 
         # Android companion-app delivery settings. The default HA notification channel
         # can be disabled on the phone, which silently discards every notification sent
@@ -181,13 +186,25 @@ class TempAlarm(hass.Hass):
             if not isinstance(limit, dict):
                 raise ValueError(f"Limit {i} is not a dictionary")
 
-            required_keys = ["lt", "gt", "message", "msg_cooldown"]
+            required_keys = ["lt", "gt", "message", "msg_cooldown", "urgent"]
             for key in required_keys:
                 if key not in limit:
                     raise ValueError(f"Limit {i} missing required key '{key}'")
 
             if not isinstance(limit["msg_cooldown"], (int, float)) or limit["msg_cooldown"] < 0:
                 raise ValueError(f"Limit {i} has invalid msg_cooldown value")
+
+            # IQ-12/IQ-23: every band states its urgency; no default, so a band
+            # nobody classified stops the app instead of guessing.
+            if not isinstance(limit["urgent"], bool):
+                raise ValueError(f"Limit {i} 'urgent' must be true or false, "
+                                 f"got {limit['urgent']!r}")
+
+        # A-71.5: an older shared module winning AppDaemon's import path must
+        # stop the app here, not raise at the first alert.
+        if not hasattr(policy, "should_notify") or not hasattr(irisone_bus, "presence_for_target"):
+            raise RuntimeError(f"stale shared module on the import path: "
+                               f"{policy.__file__}, {irisone_bus.__file__}")
 
         self.log("Configuration validation completed successfully", level="DEBUG")
 
@@ -300,6 +317,7 @@ class TempAlarm(hass.Hass):
 
             # Check each limit
             message_to_send = None
+            band_key, band_urgent, old_state = None, True, {}
 
             for i, limit in enumerate(self.limits):
                 self.log(f"Checking limit {i}: {limit['gt']}°C <= {temperature_value}°C < {limit['lt']}°C",
@@ -318,6 +336,7 @@ class TempAlarm(hass.Hass):
                     # apply() also drops keys that are no longer active, so a
                     # temperature that leaves a band and returns is news again.
                     key = self._limit_key(i, limit)
+                    old_state = dict(self.sent_state)
                     to_send, held, self.sent_state = policy.apply(
                         {key}, time.time(), self._now_hour(), self.sent_state,
                         quiet_start=self.quiet_start, quiet_end=self.quiet_end,
@@ -327,6 +346,7 @@ class TempAlarm(hass.Hass):
 
                     if to_send:
                         message_to_send = f"{limit['message']} ({temperature_value:.1f}°C)"
+                        band_key, band_urgent = key, limit["urgent"]
                         self.log(
                             f"Preparing to send message: '{message_to_send}' "
                             f"({to_send[0][1]})", level="INFO")
@@ -339,7 +359,12 @@ class TempAlarm(hass.Hass):
 
             # Send notification if message is ready
             if message_to_send:
-                self._send_notifications(message_to_send)
+                if self._send_notifications(message_to_send, band_key, band_urgent) == 0:
+                    # apply() marked the band sent before anyone was gated. Nobody
+                    # was reached, so the repeat interval must not start (IQ-13):
+                    # if the band still holds when someone comes home, it is news.
+                    self.sent_state = policy.uncommit(self.sent_state, old_state, band_key)
+                    self._save_state()
             else:
                 self.log("No notification message to send", level="DEBUG")
 
@@ -363,18 +388,37 @@ class TempAlarm(hass.Hass):
             data["ttl"] = 0
         return data
 
-    def _send_notifications(self, message: str) -> None:
+    def _send_notifications(self, message: str, band_key: str, urgent: bool) -> int:
         """
-        Send notifications to all configured recipients.
+        Send to every recipient, minus non-urgent drops for anyone away.
 
         Args:
             message: The message to send
+            band_key: The band's policy key, for drop logging and the gate counters
+            urgent: The band's configured urgency (owner, IQ-23)
+
+        Returns:
+            How many recipients were reached. 0 tells the caller to uncommit.
         """
+        reached = 0
         try:
             self.log(f"Sending notification to {len(self.recipients)} recipients", level="INFO")
+            domain = self.get_state(irisone_bus.DOMAIN)
+            now_epoch = time.time()
 
             for recipient in self.recipients:
                 try:
+                    in_home, since = irisone_bus.presence_for_target(domain, recipient, now_epoch)
+                    if urgent:
+                        send, reason = policy.should_notify(policy.URGENT, in_home)
+                    else:
+                        send, reason = policy.should_notify(policy.NON_URGENT, in_home)
+                    self._report_gate(band_key, recipient, urgent, send, reason)
+                    if not send:
+                        if policy.drop_log_due(band_key, recipient, since, self._drop_logged):
+                            self.log(f"[presence] dropped {self.name}/{band_key} to {recipient}: {reason}")
+                        continue
+
                     service_name = f"notify/{recipient}"
                     title = f"{self.alert_name} Temperature Alert"
 
@@ -387,7 +431,8 @@ class TempAlarm(hass.Hass):
                         data=self._notification_data()
                     )
 
-                    self.log(f"Successfully sent notification to {recipient}", level="INFO")
+                    self.log(f"Successfully sent notification to {recipient} ({reason})", level="INFO")
+                    reached += 1
 
                 except Exception as e:
                     self.log(f"Failed to send notification to {recipient}: {str(e)}", level="ERROR")
@@ -398,4 +443,14 @@ class TempAlarm(hass.Hass):
         except Exception as e:
             self.log(f"Error in notification sending: {str(e)}", level="ERROR")
             self.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+        return reached
+
+    def _report_gate(self, key: str, target: str, urgent: bool, send: bool, reason: str) -> None:
+        """Count the decision in irisone.notify_gate_stats (IQ-28). Never blocks a send."""
+        try:
+            urgency = policy.URGENT if urgent else policy.NON_URGENT
+            self.fire_event(irisone_bus.GATE_EVENT, **irisone_bus.gate_event(
+                self.name, key, target, urgency, send, reason))
+        except Exception as e:  # the counter is evidence, not a dependency
+            self.log(f"[presence] could not report gate decision: {e}", level="WARNING")
 
